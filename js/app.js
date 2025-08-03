@@ -1,12 +1,33 @@
 /**
- * NoteNest Application Logic (v5 - Firebase Integrated)
+ * NoteNest Application Logic (Firebase + Anonymous Auth Fallback)
  */
 
 // ----------------- IMPORTS -----------------
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
+import { 
+    getAuth, 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword, 
+    signOut, 
+    signInAnonymously,
+    onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { 
+    getFirestore, 
+    collection, 
+    addDoc, 
+    getDocs, 
+    updateDoc, 
+    doc, 
+    increment, 
+    serverTimestamp 
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { 
+    getStorage, 
+    ref, 
+    uploadBytes, 
+    getDownloadURL 
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 // ----------------- FIREBASE CONFIG -----------------
 const firebaseConfig = {
@@ -49,17 +70,27 @@ const DOMElements = {
     filterBar: document.getElementById('filter-bar'),
 };
 
-const SUBJECTS = [{ id: 'all', name: 'All Notes' }, { id: 'phy', name: 'Physics' }, { id: 'kan', name: 'Kannada' }, { id: 'hin', name: 'Hindi' }, { id: 'san', name: 'Sanskrit' }, { id: 'math', name: 'Math' }, { id: 'chem', name: 'Chemistry' }, { id: 'cs', name: 'CS' }, { id: 'eng', name: 'English' }];
+const SUBJECTS = [
+    { id: 'all', name: 'All Notes' }, 
+    { id: 'phy', name: 'Physics' }, 
+    { id: 'kan', name: 'Kannada' }, 
+    { id: 'hin', name: 'Hindi' }, 
+    { id: 'san', name: 'Sanskrit' }, 
+    { id: 'math', name: 'Math' }, 
+    { id: 'chem', name: 'Chemistry' }, 
+    { id: 'cs', name: 'CS' }, 
+    { id: 'eng', name: 'English' }
+];
 let notesCache = [];
 
 // ----------------- UI HELPERS -----------------
 const showModal = (m) => { if (openModal) hideModal(); m.classList.remove('hidden'); DOMElements.body.classList.add('modal-open'); openModal = m; };
 const hideModal = () => { if (!openModal) return; openModal.classList.add('hidden'); DOMElements.body.classList.remove('modal-open'); openModal = null; };
 const updateUIForAuthState = () => {
-    if (currentUser) {
+    if (currentUser && !currentUser.isAnonymous) {
         DOMElements.guestMenu.classList.add('hidden');
         DOMElements.userMenu.classList.remove('hidden');
-        DOMElements.userDisplay.textContent = currentUser.username;
+        DOMElements.userDisplay.textContent = currentUser.username || "Guest";
     } else {
         DOMElements.guestMenu.classList.remove('hidden');
         DOMElements.userMenu.classList.add('hidden');
@@ -82,18 +113,26 @@ const generateEmailFromUsername = (username) => `${username}@notenest.local`;
 async function signupUser(username, password) {
     const email = generateEmailFromUsername(username);
     await createUserWithEmailAndPassword(auth, email, password);
-    currentUser = { username };
+    currentUser = { username, isAnonymous: false };
     updateUIForAuthState();
 }
 
 async function loginUser(username, password) {
     const email = generateEmailFromUsername(username);
     await signInWithEmailAndPassword(auth, email, password);
-    currentUser = { username };
+    currentUser = { username, isAnonymous: false };
     updateUIForAuthState();
 }
 
+// ✅ Anonymous sign-in fallback
+async function ensureSignedIn() {
+    if (!auth.currentUser) {
+        await signInAnonymously(auth).catch(console.error);
+    }
+}
+
 async function uploadNoteToFirebase(title, subject, file) {
+    await ensureSignedIn();
     const fileRef = ref(storage, `notes/${Date.now()}_${file.name}`);
     await uploadBytes(fileRef, file);
     const downloadURL = await getDownloadURL(fileRef);
@@ -101,7 +140,7 @@ async function uploadNoteToFirebase(title, subject, file) {
     await addDoc(collection(db, "notes"), {
         title,
         subject,
-        author: currentUser.username,
+        author: currentUser?.username || "Guest",
         fileUrl: downloadURL,
         createdAt: serverTimestamp(),
         downloads: 0,
@@ -190,7 +229,11 @@ DOMElements.signupForm.addEventListener('submit', async (e) => {
     hideModal();
 });
 
-DOMElements.logoutBtn.addEventListener('click', async () => { await signOut(auth); currentUser = null; updateUIForAuthState(); });
+DOMElements.logoutBtn.addEventListener('click', async () => { 
+    await signOut(auth); 
+    currentUser = null; 
+    updateUIForAuthState(); 
+});
 
 DOMElements.uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -203,9 +246,27 @@ DOMElements.uploadForm.addEventListener('submit', async (e) => {
     fetchNotes();
 });
 
-DOMElements.filterBar.addEventListener('click', (e) => { if (e.target.matches('.filter-btn')) { activeSort = e.target.dataset.sort; DOMElements.filterBar.querySelector('.active').classList.remove('active'); e.target.classList.add('active'); displayNotes(); } });
-DOMElements.groupsList.addEventListener('click', (e) => { if (e.target.matches('.group-item')) { activeGroupId = e.target.dataset.groupId; DOMElements.feedTitle.textContent = SUBJECTS.find(g => g.id === activeGroupId).name; renderGroups(); displayNotes(); } });
-DOMElements.notesFeed.addEventListener('click', (e) => { if (e.target.closest('[data-action="like"]')) { likeNote(e.target.closest('.note-card').dataset.noteId); } });
+DOMElements.filterBar.addEventListener('click', (e) => { 
+    if (e.target.matches('.filter-btn')) { 
+        activeSort = e.target.dataset.sort; 
+        DOMElements.filterBar.querySelector('.active').classList.remove('active'); 
+        e.target.classList.add('active'); 
+        displayNotes(); 
+    } 
+});
+DOMElements.groupsList.addEventListener('click', (e) => { 
+    if (e.target.matches('.group-item')) { 
+        activeGroupId = e.target.dataset.groupId; 
+        DOMElements.feedTitle.textContent = SUBJECTS.find(g => g.id === activeGroupId).name; 
+        renderGroups(); 
+        displayNotes(); 
+    } 
+});
+DOMElements.notesFeed.addEventListener('click', (e) => { 
+    if (e.target.closest('[data-action="like"]')) { 
+        likeNote(e.target.closest('.note-card').dataset.noteId); 
+    } 
+});
 
 // ----------------- INIT -----------------
 document.getElementById('login-signup-btn').addEventListener('click', () => showModal(DOMElements.authModal));
@@ -214,9 +275,13 @@ document.getElementById('auth-modal').addEventListener('click', (e) => { if (e.t
 document.getElementById('upload-modal').addEventListener('click', (e) => { if (e.target.dataset.action === 'close-modal' || e.target === DOMElements.uploadModal) { hideModal(); } });
 DOMElements.themeToggle.addEventListener('click', toggleTheme);
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initializeTheme();
-    updateUIForAuthState();
+    await ensureSignedIn();  // ✅ Auto anonymous sign-in
+    onAuthStateChanged(auth, (user) => {
+        currentUser = user?.isAnonymous ? { username: "Guest", isAnonymous: true } : currentUser;
+        updateUIForAuthState();
+    });
     renderGroups();
     populateUploadSubjects();
     fetchNotes();
