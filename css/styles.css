@@ -1,0 +1,38 @@
+/* Base resets */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Light theme */
+html.light {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --accent: #4a90e2;
+}
+
+/* Dark theme */
+html.dark {
+  --bg: #1a1a1a;
+  --fg: #f0f0f0;
+  --accent: #79b8ff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+main {
+  flex: 1;
+  padding: 2rem;
+}
