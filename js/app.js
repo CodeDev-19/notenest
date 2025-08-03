@@ -1,5 +1,5 @@
 /**
- * NoteNest Application Logic (Firebase + Anonymous Auth Fallback)
+ * NoteNest Application Logic (Firebase + Anonymous Auth + UID for Security)
  */
 
 // ----------------- IMPORTS -----------------
@@ -112,15 +112,15 @@ const generateEmailFromUsername = (username) => `${username}@notenest.local`;
 
 async function signupUser(username, password) {
     const email = generateEmailFromUsername(username);
-    await createUserWithEmailAndPassword(auth, email, password);
-    currentUser = { username, isAnonymous: false };
+    const userCred = await createUserWithEmailAndPassword(auth, email, password);
+    currentUser = { username, isAnonymous: false, uid: userCred.user.uid };
     updateUIForAuthState();
 }
 
 async function loginUser(username, password) {
     const email = generateEmailFromUsername(username);
-    await signInWithEmailAndPassword(auth, email, password);
-    currentUser = { username, isAnonymous: false };
+    const userCred = await signInWithEmailAndPassword(auth, email, password);
+    currentUser = { username, isAnonymous: false, uid: userCred.user.uid };
     updateUIForAuthState();
 }
 
@@ -133,6 +133,7 @@ async function ensureSignedIn() {
 
 async function uploadNoteToFirebase(title, subject, file) {
     await ensureSignedIn();
+    const user = auth.currentUser;
     const fileRef = ref(storage, `notes/${Date.now()}_${file.name}`);
     await uploadBytes(fileRef, file);
     const downloadURL = await getDownloadURL(fileRef);
@@ -144,7 +145,8 @@ async function uploadNoteToFirebase(title, subject, file) {
         fileUrl: downloadURL,
         createdAt: serverTimestamp(),
         downloads: 0,
-        likes: 0
+        likes: 0,
+        uid: user.uid  // ✅ now saved
     });
 }
 
@@ -279,7 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeTheme();
     await ensureSignedIn();  // ✅ Auto anonymous sign-in
     onAuthStateChanged(auth, (user) => {
-        currentUser = user?.isAnonymous ? { username: "Guest", isAnonymous: true } : currentUser;
+        currentUser = user?.isAnonymous ? { username: "Guest", isAnonymous: true, uid: user.uid } : currentUser;
         updateUIForAuthState();
     });
     renderGroups();
