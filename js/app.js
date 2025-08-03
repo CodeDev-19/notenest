@@ -1,8 +1,7 @@
 /**
- * NoteNest Application Logic (Firebase + Anonymous Auth + UID for Security)
+ * NoteNest Application Logic (Fixed Username Auth)
  */
 
-// ----------------- IMPORTS -----------------
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { 
     getAuth, 
@@ -18,6 +17,8 @@ import {
     addDoc, 
     getDocs, 
     updateDoc, 
+    setDoc,
+    getDoc,
     doc, 
     increment, 
     serverTimestamp 
@@ -108,11 +109,18 @@ const toggleTheme = () => {
 };
 
 // ----------------- FIREBASE FUNCTIONS -----------------
-const generateEmailFromUsername = (username) => `${username}@notenest.local`;
+const generateEmailFromUsername = (username) => `${username.toLowerCase()}@notenest.app`;
 
 async function signupUser(username, password) {
     const email = generateEmailFromUsername(username);
     const userCred = await createUserWithEmailAndPassword(auth, email, password);
+
+    // Store username in Firestore
+    await setDoc(doc(db, "users", userCred.user.uid), {
+        username: username,
+        createdAt: serverTimestamp()
+    });
+
     currentUser = { username, isAnonymous: false, uid: userCred.user.uid };
     updateUIForAuthState();
 }
@@ -120,11 +128,16 @@ async function signupUser(username, password) {
 async function loginUser(username, password) {
     const email = generateEmailFromUsername(username);
     const userCred = await signInWithEmailAndPassword(auth, email, password);
-    currentUser = { username, isAnonymous: false, uid: userCred.user.uid };
+
+    // Fetch username from Firestore
+    const userDoc = await getDoc(doc(db, "users", userCred.user.uid));
+    const fetchedUsername = userDoc.exists() ? userDoc.data().username : username;
+
+    currentUser = { username: fetchedUsername, isAnonymous: false, uid: userCred.user.uid };
     updateUIForAuthState();
 }
 
-// ✅ Anonymous sign-in fallback
+// ✅ Anonymous browsing fallback
 async function ensureSignedIn() {
     if (!auth.currentUser) {
         await signInAnonymously(auth).catch(console.error);
@@ -146,7 +159,7 @@ async function uploadNoteToFirebase(title, subject, file) {
         createdAt: serverTimestamp(),
         downloads: 0,
         likes: 0,
-        uid: user.uid  // ✅ now saved
+        uid: user.uid
     });
 }
 
@@ -279,9 +292,14 @@ DOMElements.themeToggle.addEventListener('click', toggleTheme);
 
 document.addEventListener('DOMContentLoaded', async () => {
     initializeTheme();
-    await ensureSignedIn();  // ✅ Auto anonymous sign-in
-    onAuthStateChanged(auth, (user) => {
-        currentUser = user?.isAnonymous ? { username: "Guest", isAnonymous: true, uid: user.uid } : currentUser;
+    await ensureSignedIn();
+    onAuthStateChanged(auth, async (user) => {
+        if (user?.isAnonymous) {
+            currentUser = { username: "Guest", isAnonymous: true, uid: user.uid };
+        } else if (user) {
+            const userDoc = await getDoc(doc(db, "users", user.uid));
+            currentUser = { username: userDoc.exists() ? userDoc.data().username : "User", isAnonymous: false, uid: user.uid };
+        }
         updateUIForAuthState();
     });
     renderGroups();
